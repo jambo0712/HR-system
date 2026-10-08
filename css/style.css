@@ -84,6 +84,7 @@ th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: le
 th { font-size: .85rem; color: var(--muted); font-weight: 600; background: var(--bg); }
 tfoot td { font-weight: 700; }
 td.num, th.num { text-align: right; }
+input.mini { width: 78px; padding: 5px 6px; }
 .empty { padding: 28px; text-align: center; color: var(--muted); }
 .tag { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: .78rem; background: var(--bg); border: 1px solid var(--line); }
 
