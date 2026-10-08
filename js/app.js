@@ -587,6 +587,37 @@
   /* ======================================================
      勞務報酬
   ====================================================== */
+  function showServiceSlip(r) {
+    const ov = $('#slipOverlay');
+    const no = `LR-${r.pay_date.replace(/-/g, '')}-${r.id.slice(0, 4).toUpperCase()}`;
+    const blank = '<span class="muted">（未填）</span>';
+    ov.innerHTML = `
+      <div class="slip-tools"><button class="btn primary" id="slipPrint">列印</button><button class="btn" id="slipClose">關閉</button></div>
+      <div class="slip">
+        <h2>${esc(rates.company)}</h2>
+        <div class="sub">勞務報酬單　單號 ${esc(no)}</div>
+        <div class="info">
+          <div>給付日期：${esc(r.pay_date)}</div><div>給付事由：${esc(r.category) || blank}</div>
+          <div>領款人：${esc(r.payee)}</div><div>身分證／居留證字號：${esc(r.payee_id_no) || blank}</div>
+          <div style="grid-column:1/-1">戶籍地址：${esc(r.payee_address) || blank}</div>
+        </div>
+        <table><thead><tr><th>項目</th><th class="num">金額（元）</th></tr></thead><tbody>
+          <tr><td><b>給付金額</b></td><td class="num"><b>${money(r.gross)}</b></td></tr>
+          <tr><td>扣繳所得稅</td><td class="num">${money(r.withholding)}</td></tr>
+          <tr><td>二代健保補充保費</td><td class="num">${money(r.nhi)}</td></tr>
+        </tbody></table>
+        <div class="netline">實領金額　$${money(r.net)}</div>
+        ${r.note ? `<p>備註：${esc(r.note)}</p>` : ''}
+        <div class="sign">
+          <div>領款人簽章：</div><div>經手人／主管：</div>
+        </div>
+        <div class="foot">茲收到上列款項無誤。</div>
+      </div>`;
+    ov.hidden = false;
+    $('#slipClose').onclick = () => (ov.hidden = true);
+    $('#slipPrint').onclick = () => window.print();
+  }
+
   async function viewService() {
     const year = new Date().getFullYear();
     view.innerHTML = `
@@ -597,8 +628,11 @@
           <div class="grid">
             <label>給付日期<input type="date" name="pay_date" value="${today()}" required></label>
             <label>領款人 *<input name="payee" required></label>
-            <label>類別（設計、稿費…）<input name="category"></label>
+            <label>給付事由／類別（設計、稿費…）<input name="category"></label>
             <label>給付金額（元）*<input type="number" min="0" name="gross" required></label>
+            <label>身分證／居留證字號（開單據用）<input name="payee_id_no" maxlength="10" autocomplete="off"
+              pattern="[A-Za-z][A-Da-d12][0-9]{8}" title="格式：1 個英文字母＋1 位數字（或 A–D）＋8 位數字"></label>
+            <label>戶籍地址（開單據用）<input name="payee_address" autocomplete="off"></label>
           </div>
           <label style="margin-top:10px">備註<input name="note"></label>
           <div id="svPreview" class="muted" style="margin:10px 0"></div>
@@ -619,6 +653,7 @@
       const r = calcService(f.get('gross'), rates);
       await q(sb.from('service_payments').insert({
         pay_date: f.get('pay_date'), payee: f.get('payee').trim(), category: f.get('category').trim(),
+        payee_id_no: f.get('payee_id_no').trim().toUpperCase(), payee_address: f.get('payee_address').trim(),
         gross: r.gross, withholding: r.withholding, nhi: r.nhi, net: r.net, note: f.get('note').trim()
       }));
       toast('已儲存'); form.reset(); form.pay_date.value = today(); $('#svPreview').textContent = ''; load();
@@ -629,9 +664,10 @@
       list = await q(sb.from('service_payments').select('*').gte('pay_date', `${y}-01-01`).lte('pay_date', `${y}-12-31`).order('pay_date', { ascending: false }));
       const s = (f) => list.reduce((a, r) => a + r[f], 0);
       $('#svList').innerHTML = list.length ? `<table><thead><tr><th>日期</th><th>領款人</th><th>類別</th><th class="num">金額</th><th class="num">扣繳</th><th class="num">補充保費</th><th class="num">實領</th><th></th></tr></thead>
-        <tbody>${list.map((r) => `<tr><td>${esc(r.pay_date)}</td><td>${esc(r.payee)}</td><td>${esc(r.category)}</td><td class="num">${money(r.gross)}</td><td class="num">${money(r.withholding)}</td><td class="num">${money(r.nhi)}</td><td class="num">${money(r.net)}</td><td><button class="btn small danger" data-del="${r.id}">刪除</button></td></tr>`).join('')}</tbody>
+        <tbody>${list.map((r) => `<tr><td>${esc(r.pay_date)}</td><td>${esc(r.payee)}</td><td>${esc(r.category)}</td><td class="num">${money(r.gross)}</td><td class="num">${money(r.withholding)}</td><td class="num">${money(r.nhi)}</td><td class="num">${money(r.net)}</td><td><button class="btn small" data-slip="${r.id}">勞務報酬單</button> <button class="btn small danger" data-del="${r.id}">刪除</button></td></tr>`).join('')}</tbody>
         <tfoot><tr><td colspan="3">合計</td><td class="num">${money(s('gross'))}</td><td class="num">${money(s('withholding'))}</td><td class="num">${money(s('nhi'))}</td><td class="num">${money(s('net'))}</td><td></td></tr></tfoot></table>`
         : '<div class="empty">這一年度還沒有紀錄。</div>';
+      $('#svList').querySelectorAll('[data-slip]').forEach((b) => (b.onclick = () => showServiceSlip(list.find((r) => r.id === b.dataset.slip))));
       $('#svList').querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => {
         if (!confirm('確定刪除這筆紀錄？')) return;
         await q(sb.from('service_payments').delete().eq('id', b.dataset.del)); load();
@@ -640,8 +676,8 @@
     $('#svYear').onchange = load;
     $('#svCsv').onclick = () => {
       if (!list.length) return toast('沒有資料可匯出', true);
-      downloadCSV(`勞務報酬_${$('#svYear').value}.csv`, [['日期', '領款人', '類別', '金額', '扣繳稅款', '補充保費', '實領', '備註'],
-        ...list.map((r) => [r.pay_date, r.payee, r.category, r.gross, r.withholding, r.nhi, r.net, r.note])]);
+      downloadCSV(`勞務報酬_${$('#svYear').value}.csv`, [['日期', '領款人', '身分證字號', '戶籍地址', '類別', '金額', '扣繳稅款', '補充保費', '實領', '備註'],
+        ...list.map((r) => [r.pay_date, r.payee, r.payee_id_no, r.payee_address, r.category, r.gross, r.withholding, r.nhi, r.net, r.note])]);
     };
     load();
   }

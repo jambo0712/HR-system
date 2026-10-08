@@ -130,6 +130,8 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .slip td, .slip th { border-bottom: 1px solid #ddd; }
 .slip .info { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 16px; margin-bottom: 14px; }
 .slip .netline { font-size: 1.2rem; font-weight: 700; text-align: right; border-top: 2px solid #111; padding-top: 8px; }
+.slip .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 40px; }
+.slip .sign div { border-bottom: 1px solid #111; padding-bottom: 36px; }
 .slip .foot { color: #666; font-size: .8rem; margin-top: 18px; }
 
 @media print {
