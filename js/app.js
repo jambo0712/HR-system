@@ -587,12 +587,89 @@
   /* ======================================================
      勞務報酬
   ====================================================== */
+  const ID_BUCKET = 'id-docs';
+  const ID_SIDES = [['front', '正面', 'id_front_path'], ['back', '反面', 'id_back_path']];
+
+  // 縮圖並轉成 JPEG：檔案變小，同時去除照片內的 EXIF（含 GPS 位置）
+  async function compressImage(file) {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    return new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('圖片處理失敗'))), 'image/jpeg', 0.82));
+  }
+  async function idSignedUrl(path) {
+    const { data } = await sb.storage.from(ID_BUCKET).createSignedUrl(path, 3600);
+    return data ? data.signedUrl : '';
+  }
+
+  function renderIdPanel(r) {
+    const panel = $('#idPanel');
+    const attach = $('#slipAttach');
+    panel.innerHTML = `
+      <h3>身分證影本（正反面）</h3>
+      <p class="muted">身分證影本屬高度敏感個資：僅存放在你的私有儲存空間，需登入才看得到；圖片會自動縮小並移除拍攝位置等資訊。請僅用於扣繳申報備查，並依個資法妥善保管。</p>
+      <div class="id-grid">${ID_SIDES.map(([side, label, col]) => `
+        <div class="id-slot" data-side="${side}">
+          <b>${label}</b>
+          ${r[col] ? `<img alt="身分證${label}" data-img="${side}"><div class="row">
+              <label class="btn small">重新上傳<input type="file" accept="image/*" hidden data-up="${side}"></label>
+              <button class="btn small danger" data-rm="${side}">刪除</button></div>`
+            : `<div class="id-empty">尚未上傳</div>
+              <label class="btn small">選擇圖片<input type="file" accept="image/*" hidden data-up="${side}"></label>`}
+        </div>`).join('')}</div>
+      <label class="check"><input type="checkbox" id="attachChk" ${$('#slipOverlay').classList.contains('with-attach') ? 'checked' : ''}> 列印勞務報酬單時，另附身分證影本頁</label>`;
+
+    // 縮圖與列印用附件（簽名網址，非公開）
+    attach.innerHTML = ID_SIDES.some(([, , col]) => r[col])
+      ? `<h3>身分證影本</h3><div class="id-pair">${ID_SIDES.map(([side, label, col]) => (r[col] ? `<figure><img alt="${label}" data-att="${side}"><figcaption>${label}</figcaption></figure>` : '')).join('')}</div>` : '';
+    ID_SIDES.forEach(async ([side, , col]) => {
+      if (!r[col]) return;
+      const url = await idSignedUrl(r[col]);
+      panel.querySelectorAll(`[data-img="${side}"]`).forEach((i) => (i.src = url));
+      attach.querySelectorAll(`[data-att="${side}"]`).forEach((i) => (i.src = url));
+    });
+
+    $('#attachChk').onchange = (e) => $('#slipOverlay').classList.toggle('with-attach', e.target.checked);
+    panel.querySelectorAll('[data-up]').forEach((inp) => (inp.onchange = async () => {
+      const file = inp.files[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) return toast('請選擇圖片檔（JPG／PNG 等）', true);
+      if (file.size > 20 * 1024 * 1024) return toast('圖片超過 20MB，請先縮小', true);
+      const side = inp.dataset.up, col = `id_${side}_path`;
+      try {
+        toast('處理並上傳中…');
+        const blob = await compressImage(file);
+        const path = `${r.id}/${side}.jpg`;
+        const { error } = await sb.storage.from(ID_BUCKET).upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+        if (error) throw error;
+        await q(sb.from('service_payments').update({ [col]: path }).eq('id', r.id));
+        r[col] = path;
+        toast('已上傳');
+        renderIdPanel(r);
+      } catch (e) { toast('上傳失敗：' + (e.message || e), true); }
+    }));
+    panel.querySelectorAll('[data-rm]').forEach((btn) => (btn.onclick = async () => {
+      const col = `id_${btn.dataset.rm}_path`;
+      if (!confirm('確定刪除這張身分證影本？刪除後無法復原。')) return;
+      await sb.storage.from(ID_BUCKET).remove([r[col]]);
+      await q(sb.from('service_payments').update({ [col]: null }).eq('id', r.id));
+      r[col] = null;
+      toast('已刪除');
+      renderIdPanel(r);
+    }));
+  }
+
   function showServiceSlip(r) {
     const ov = $('#slipOverlay');
+    ov.classList.remove('with-attach');
     const no = `LR-${r.pay_date.replace(/-/g, '')}-${r.id.slice(0, 4).toUpperCase()}`;
     const blank = '<span class="muted">（未填）</span>';
     ov.innerHTML = `
       <div class="slip-tools"><button class="btn primary" id="slipPrint">列印</button><button class="btn" id="slipClose">關閉</button></div>
+      <div class="id-panel card" id="idPanel"></div>
       <div class="slip">
         <h2>${esc(rates.company)}</h2>
         <div class="sub">勞務報酬單　單號 ${esc(no)}</div>
@@ -612,10 +689,12 @@
           <div>領款人簽章：</div><div>經手人／主管：</div>
         </div>
         <div class="foot">茲收到上列款項無誤。</div>
+        <div class="slip-attach" id="slipAttach"></div>
       </div>`;
     ov.hidden = false;
-    $('#slipClose').onclick = () => (ov.hidden = true);
+    $('#slipClose').onclick = () => { ov.hidden = true; ov.classList.remove('with-attach'); ov.innerHTML = ''; };
     $('#slipPrint').onclick = () => window.print();
+    renderIdPanel(r);
   }
 
   async function viewService() {
@@ -670,6 +749,9 @@
       $('#svList').querySelectorAll('[data-slip]').forEach((b) => (b.onclick = () => showServiceSlip(list.find((r) => r.id === b.dataset.slip))));
       $('#svList').querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => {
         if (!confirm('確定刪除這筆紀錄？')) return;
+        const rec = list.find((x) => x.id === b.dataset.del);
+        const files = [rec.id_front_path, rec.id_back_path].filter(Boolean);
+        if (files.length) await sb.storage.from(ID_BUCKET).remove(files); // 一併刪除身分證影本
         await q(sb.from('service_payments').delete().eq('id', b.dataset.del)); load();
       }));
     };
