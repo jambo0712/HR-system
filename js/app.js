@@ -222,6 +222,11 @@
           <label>員工編號<input name="emp_no" value="${esc(e.emp_no)}"></label>
           <label>姓名 *<input name="name" value="${esc(e.name)}" required></label>
           <label>職稱<input name="title" value="${esc(e.title)}"></label>
+          <label>身分證／居留證字號（選填）<input name="id_no" maxlength="10" autocomplete="off" value="${esc(e.id_no)}"
+            pattern="[A-Za-z][A-Da-d12][0-9]{8}" title="格式：1 個英文字母＋1 位數字（或 A–D）＋8 位數字"></label>
+          <label>戶籍地址（選填）<input name="address" autocomplete="off" value="${esc(e.address)}"></label>
+          <label>Email（選填）<input type="email" name="email" autocomplete="off" value="${esc(e.email)}"></label>
+          <label>聯絡電話（選填）<input type="tel" name="phone" autocomplete="off" value="${esc(e.phone)}"></label>
           <label>到職日<input type="date" name="hire_date" value="${esc(e.hire_date || '')}"></label>
           <label>離職日（在職免填）<input type="date" name="resign_date" value="${esc(e.resign_date || '')}"></label>
           <label>類型<select name="emp_type">
@@ -251,6 +256,8 @@
       const f = new FormData(form);
       const row = {
         emp_no: f.get('emp_no').trim(), name: f.get('name').trim(), title: f.get('title').trim(),
+        id_no: f.get('id_no').trim().toUpperCase(), address: f.get('address').trim(),
+        email: f.get('email').trim(), phone: f.get('phone').trim(),
         hire_date: f.get('hire_date') || null, resign_date: f.get('resign_date') || null, emp_type: f.get('emp_type'),
         base_salary: Math.round(num(f.get('base_salary'))),
         labor_insured: Math.round(num(f.get('labor_insured'))),
@@ -590,6 +597,13 @@
   const ID_BUCKET = 'id-docs';
   const ID_SIDES = [['front', '正面', 'id_front_path'], ['back', '反面', 'id_back_path']];
 
+  const PAYEE_STATUS = [['national', '本國籍'], ['foreign_183', '外國籍在台滿 183 天'], ['foreign_under', '外國籍在台未滿 183 天']];
+  const INCOME_TYPES = [['50', '50 薪資所得（兼職人員薪資）'], ['9A', '9A 執行業務所得'], ['9B', '9B 稿費'], ['92', '92 其他所得']];
+  const PAY_METHODS = [['cash', '現金'], ['transfer', '匯款'], ['check', '支票'], ['voucher', '禮券']];
+  const SV_TEXT_FIELDS = ['pay_date', 'payee', 'payee_id_no', 'payee_address', 'payee_phone', 'payee_email', 'category',
+    'period_start', 'period_end', 'gross', 'bank_name', 'bank_branch', 'bank_account', 'account_holder', 'note',
+    'payee_status', 'income_type', 'pay_method'];
+
   // 縮圖並轉成 JPEG：檔案變小，同時去除照片內的 EXIF（含 GPS 位置）
   async function compressImage(file) {
     const bmp = await createImageBitmap(file);
@@ -605,34 +619,30 @@
     return data ? data.signedUrl : '';
   }
 
+  // 上傳區（單據下方）；上傳後的影本會同步顯示在單據的「影本黏貼處」
   function renderIdPanel(r) {
     const panel = $('#idPanel');
-    const attach = $('#slipAttach');
     panel.innerHTML = `
-      <h3>身分證影本（正反面）</h3>
-      <p class="muted">身分證影本屬高度敏感個資：僅存放在你的私有儲存空間，需登入才看得到；圖片會自動縮小並移除拍攝位置等資訊。請僅用於扣繳申報備查，並依個資法妥善保管。</p>
+      <h3>身分證（居留證／護照）影本</h3>
+      <p class="muted">上傳後會自動出現在上方單據的「影本黏貼處」。影本屬高度敏感個資：僅存放在你的私有儲存空間，需登入才看得到；圖片會自動縮小並移除拍攝位置等資訊。請僅用於扣繳申報備查，並依個資法妥善保管。</p>
       <div class="id-grid">${ID_SIDES.map(([side, label, col]) => `
         <div class="id-slot" data-side="${side}">
           <b>${label}</b>
-          ${r[col] ? `<img alt="身分證${label}" data-img="${side}"><div class="row">
+          ${r[col] ? `<img alt="影本${label}" data-img="${side}"><div class="row">
               <label class="btn small">重新上傳<input type="file" accept="image/*" hidden data-up="${side}"></label>
               <button class="btn small danger" data-rm="${side}">刪除</button></div>`
             : `<div class="id-empty">尚未上傳</div>
               <label class="btn small">選擇圖片<input type="file" accept="image/*" hidden data-up="${side}"></label>`}
-        </div>`).join('')}</div>
-      <label class="check"><input type="checkbox" id="attachChk" ${$('#slipOverlay').classList.contains('with-attach') ? 'checked' : ''}> 列印勞務報酬單時，另附身分證影本頁</label>`;
+        </div>`).join('')}</div>`;
 
-    // 縮圖與列印用附件（簽名網址，非公開）
-    attach.innerHTML = ID_SIDES.some(([, , col]) => r[col])
-      ? `<h3>身分證影本</h3><div class="id-pair">${ID_SIDES.map(([side, label, col]) => (r[col] ? `<figure><img alt="${label}" data-att="${side}"><figcaption>${label}</figcaption></figure>` : '')).join('')}</div>` : '';
     ID_SIDES.forEach(async ([side, , col]) => {
-      if (!r[col]) return;
+      const slipImg = $(`#slipOverlay [data-lfimg="${side}"]`);
+      if (!r[col]) { if (slipImg) { slipImg.removeAttribute('src'); slipImg.hidden = true; } return; }
       const url = await idSignedUrl(r[col]);
       panel.querySelectorAll(`[data-img="${side}"]`).forEach((i) => (i.src = url));
-      attach.querySelectorAll(`[data-att="${side}"]`).forEach((i) => (i.src = url));
+      if (slipImg) { slipImg.src = url; slipImg.hidden = false; }
     });
 
-    $('#attachChk').onchange = (e) => $('#slipOverlay').classList.toggle('with-attach', e.target.checked);
     panel.querySelectorAll('[data-up]').forEach((inp) => (inp.onchange = async () => {
       const file = inp.files[0];
       if (!file) return;
@@ -653,7 +663,7 @@
     }));
     panel.querySelectorAll('[data-rm]').forEach((btn) => (btn.onclick = async () => {
       const col = `id_${btn.dataset.rm}_path`;
-      if (!confirm('確定刪除這張身分證影本？刪除後無法復原。')) return;
+      if (!confirm('確定刪除這張影本？刪除後無法復原。')) return;
       await sb.storage.from(ID_BUCKET).remove([r[col]]);
       await q(sb.from('service_payments').update({ [col]: null }).eq('id', r.id));
       r[col] = null;
@@ -662,104 +672,243 @@
     }));
   }
 
+  // 勞務報酬單（附件格式，A4 一頁）
   function showServiceSlip(r) {
     const ov = $('#slipOverlay');
-    ov.classList.remove('with-attach');
-    const no = `LR-${r.pay_date.replace(/-/g, '')}-${r.id.slice(0, 4).toUpperCase()}`;
-    const blank = '<span class="muted">（未填）</span>';
+    const st = r.payee_status || 'national';
+    const ty = r.income_type || '9A';
+    const resident = st !== 'foreign_under';
+    const roc = new Date(r.pay_date).getFullYear() - 1911;
+    const pct = (v) => Number((v * 100).toFixed(4));
+    const nhiTxt = `${pct(rates.suppRate)}%`;
+    const box = (on) => (on ? '■' : '□');
+    const rocDate = (d) => { if (!d) return '　　年　　月　　日'; const [y, m, dd] = d.split('-').map(Number); return `${y - 1911}年${m}月${dd}日`; };
+    const company = rates.company.endsWith('公司') ? rates.company : rates.company + '公司';
+    const exemptTxt = `提供職業工會的健保加保證明，不須扣${nhiTxt}補充保費。`;
+    const has = (v) => (v ? esc(v) : '');
+    const amt = (v) => `<u>&nbsp;&nbsp;${money(v)}&nbsp;&nbsp;</u>`;
+
+    const resRows = [
+      ['50', '薪資所得', '兼職人員薪資。',
+        `全數計入所得，但可扣除薪資特別扣除額(${roc}年為${Number((rates.taxSpecial / 10000).toFixed(2))}萬元)。<br>達${money(rates.salaryWithholdThreshold)}元，須代扣所得稅${pct(rates.salaryWithholdRate)}%。<br>金額達基本工資(${roc}年為${money(rates.minWage)}元)，須負擔${nhiTxt}補充保費。<br>${exemptTxt}`],
+      ['9A', '執行業務所得', '以專業能力取得之酬勞。包含律師、工程師、節目製作人等。',
+        `無免稅額，扣除所屬類別費用率後計入個人所得。<br>達${money(rates.svcWithholdThreshold)}元，需代扣所得稅${pct(rates.svcWithholdRate)}%。<br>達${money(rates.svcNhiThreshold)}元，需扣繳${nhiTxt}補充保費。<br>${exemptTxt}`],
+      ['9B', '稿費', '包含顧問費、演講費、出席費、稿費。',
+        `可先扣18萬免稅額，再扣除30%費用後計入個人所得。<br>達${money(rates.svcWithholdThreshold)}元，需代扣所得稅${pct(rates.svcWithholdRate)}%。<br>達${money(rates.svcNhiThreshold)}元，需扣繳${nhiTxt}補充保費。<br>${exemptTxt}`],
+      ['92', '其他所得', '', `不須扣繳、不須${nhiTxt}補充保費。`]
+    ];
+    const nonRows = [
+      ['50', '薪資所得', `${roc}年薪資${money(rates.nonResSalaryLimit)}元以下扣繳${pct(rates.nonResSalaryLowRate)}%、逾${money(rates.nonResSalaryLimit)}元扣繳${pct(rates.nonResSalaryHighRate)}%。`],
+      ['9A', '執行業務所得', `均須扣繳${pct(rates.nonResRate)}%。`],
+      ['9B', '稿費', `領款金額不超過${money(rates.nonResManuscriptLimit)}元不須扣繳，逾${money(rates.nonResManuscriptLimit)}元須扣繳${pct(rates.nonResRate)}%。`],
+      ['92', '其他所得', `均須扣繳${pct(rates.nonResRate)}%。`]
+    ];
+
     ov.innerHTML = `
       <div class="slip-tools"><button class="btn primary" id="slipPrint">列印</button><button class="btn" id="slipClose">關閉</button></div>
-      <div class="id-panel card" id="idPanel"></div>
-      <div class="slip">
-        <h2>${esc(rates.company)}</h2>
-        <div class="sub">勞務報酬單　單號 ${esc(no)}</div>
-        <div class="info">
-          <div>給付日期：${esc(r.pay_date)}</div><div>給付事由：${esc(r.category) || blank}</div>
-          <div>領款人：${esc(r.payee)}</div><div>身分證／居留證字號：${esc(r.payee_id_no) || blank}</div>
-          <div style="grid-column:1/-1">戶籍地址：${esc(r.payee_address) || blank}</div>
-        </div>
-        <table><thead><tr><th>項目</th><th class="num">金額（元）</th></tr></thead><tbody>
-          <tr><td><b>給付金額</b></td><td class="num"><b>${money(r.gross)}</b></td></tr>
-          <tr><td>扣繳所得稅</td><td class="num">${money(r.withholding)}</td></tr>
-          <tr><td>二代健保補充保費</td><td class="num">${money(r.nhi)}</td></tr>
-        </tbody></table>
-        <div class="netline">實領金額　$${money(r.net)}</div>
-        ${r.note ? `<p>備註：${esc(r.note)}</p>` : ''}
-        <div class="sign">
-          <div>領款人簽章：</div><div>經手人／主管：</div>
-        </div>
-        <div class="foot">茲收到上列款項無誤。</div>
-        <div class="slip-attach" id="slipAttach"></div>
-      </div>`;
+      <div class="slip lf-wrap">
+        <h2 class="lf-title">${esc(company)} 勞務報酬單</h2>
+        <div class="lf-date">填表日期：${esc(rocDate(r.pay_date))}</div>
+        <table class="lf">
+          <colgroup><col style="width:12%"><col style="width:28%"><col style="width:30%"><col style="width:30%"></colgroup>
+          <tr>
+            <td class="c" rowspan="3">所得人資料</td>
+            <td rowspan="3" class="chk">${PAYEE_STATUS.map(([k, l]) => `${box(st === k)}${l}`).join('<br>')}</td>
+            <td>姓名：${has(r.payee)}</td>
+            <td>身分證字號：<br><span class="s">(居留證/護照號碼)</span> ${has(r.payee_id_no)}</td>
+          </tr>
+          <tr><td colspan="2">戶籍地址：${has(r.payee_address)}</td></tr>
+          <tr><td colspan="2">連絡電話：${has(r.payee_phone)}${r.payee_email ? `　Email：${has(r.payee_email)}` : ''}</td></tr>
+          <tr><td colspan="2">勞務內容：${has(r.category)}</td>
+              <td colspan="2" class="r">期間：自 ${esc(rocDate(r.period_start))} 至 ${esc(rocDate(r.period_end))}</td></tr>
+
+          <tr><td class="c" rowspan="5">所得類別<br><span class="s">(本國籍、在台滿 183 天)</span></td>
+              <td class="c">類別</td><td colspan="2">注意事項：單次給付(同日、同筆費用)</td></tr>
+          ${resRows.map(([code, name, desc, note]) => `<tr>
+              <td>${box(resident && ty === code)}${code} ${name}${desc ? `<br><span class="s">${desc}</span>` : ''}</td>
+              <td colspan="2" class="s">${note}</td></tr>`).join('')}
+
+          <tr><td class="c" rowspan="5">所得類別<br><span class="s">(在台未滿 183 天)</span></td>
+              <td class="c">類別</td><td colspan="2">注意事項：須於 10 日內申報。</td></tr>
+          ${nonRows.map(([code, name, note]) => `<tr>
+              <td>${box(!resident && ty === code)}${code} ${name}</td><td colspan="2" class="s">${note}</td></tr>`).join('')}
+
+          <tr>
+            <td class="c">領款金額</td>
+            <td colspan="2" class="amt">
+              支領金額： 新台幣 ${amt(r.gross)} 元<br>
+              代扣所得稅：新台幣 ${amt(r.withholding)} 元<br>
+              二代健保： 新台幣 ${amt(r.nhi)} 元${r.nhi_exempt ? ' <span class="s">(已提供加保證明，免扣)</span>' : ''}<br>
+              支領淨額： 新台幣 ${amt(r.net)} 元
+              <div class="bank">銀行名稱：${has(r.bank_name)}<br>銀行分行：${has(r.bank_branch)}<br>
+                所得人帳號：${has(r.bank_account)}<br>所得人戶名：${has(r.account_holder)}<br>
+                付款方式：${PAY_METHODS.map(([k, l]) => `${box((r.pay_method || 'transfer') === k)}${l}`).join(' ')}</div>
+              ${r.note ? `<div class="s">備註：${esc(r.note)}</div>` : ''}
+            </td>
+            <td class="signs"><div class="sg">領款人：<span class="r s">(簽名或蓋章)</span></div><div class="sg">會計/經辦人：</div></td>
+          </tr>
+          <tr><td colspan="4" class="c">身分證(居留證/護照)影本黏貼處</td></tr>
+          <tr><td colspan="4" class="pair"><div class="pairin">
+            <div class="half"><div class="hd">正面</div><div class="imgbox"><img data-lfimg="front" alt="影本正面" hidden></div></div>
+            <div class="half"><div class="hd">反面</div><div class="imgbox"><img data-lfimg="back" alt="影本反面" hidden></div></div>
+          </div></td></tr>
+        </table>
+      </div>
+      <div class="id-panel card" id="idPanel" style="margin-top:12px"></div>`;
     ov.hidden = false;
-    $('#slipClose').onclick = () => { ov.hidden = true; ov.classList.remove('with-attach'); ov.innerHTML = ''; };
+    $('#slipClose').onclick = () => { ov.hidden = true; ov.innerHTML = ''; };
     $('#slipPrint').onclick = () => window.print();
     renderIdPanel(r);
   }
 
+  const optionsHTML = (list, sel) => list.map(([k, l]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${l}</option>`).join('');
+
   async function viewService() {
+    await loadEmployees();
     const year = new Date().getFullYear();
     view.innerHTML = `
-      <div class="page-head"><h2>勞務報酬（外包／稿費）</h2></div>
-      <div class="two-col">
-        <form class="card" id="svForm">
-          <h3>新增一筆</h3>
-          <div class="grid">
-            <label>給付日期<input type="date" name="pay_date" value="${today()}" required></label>
-            <label>領款人 *<input name="payee" required></label>
-            <label>給付事由／類別（設計、稿費…）<input name="category"></label>
-            <label>給付金額（元）*<input type="number" min="0" name="gross" required></label>
-            <label>身分證／居留證字號（開單據用）<input name="payee_id_no" maxlength="10" autocomplete="off"
-              pattern="[A-Za-z][A-Da-d12][0-9]{8}" title="格式：1 個英文字母＋1 位數字（或 A–D）＋8 位數字"></label>
-            <label>戶籍地址（開單據用）<input name="payee_address" autocomplete="off"></label>
-          </div>
-          <label style="margin-top:10px">備註<input name="note"></label>
-          <div id="svPreview" class="muted" style="margin:10px 0"></div>
-          <div class="dlg-actions"><button class="btn primary" type="submit">儲存</button></div>
-          <p class="note">以居住者為準：單次達 $${money(rates.svcWithholdThreshold)} 扣繳 ${Number((rates.svcWithholdRate * 100).toFixed(4))}%，達 $${money(rates.svcNhiThreshold)} 扣補充保費 ${Number((rates.suppRate * 100).toFixed(4))}%。稿費免稅額、非居住者、薪資所得等情形需自行判斷。</p>
-        </form>
-        <div class="card"><div class="row"><label>年度<input type="number" id="svYear" value="${year}" style="width:100px"></label>
-          <button class="btn" id="svCsv">匯出 CSV</button></div><div class="table-wrap" id="svList" style="margin-top:10px"></div></div>
-      </div>`;
+      <div class="page-head"><h2>勞務報酬單</h2></div>
+      <form class="card" id="svForm">
+        <h3 id="svTitle">新增勞務報酬單</h3>
+        <label style="margin-bottom:10px;max-width:360px">領款人來源
+          <select id="svSource">
+            <option value="">手動輸入（外部人員）</option>
+            ${employees.map((e) => `<option value="${e.id}">${esc(e.emp_no)} ${esc(e.name)}${e.active ? '' : '（離職）'}</option>`).join('')}
+          </select>
+        </label>
+        <h4>所得人資料</h4>
+        <div class="grid">
+          <label>填表／給付日期<input type="date" name="pay_date" value="${today()}" required></label>
+          <label>身分別<select name="payee_status">${optionsHTML(PAYEE_STATUS, 'national')}</select></label>
+          <label>姓名 *<input name="payee" required></label>
+          <label>身分證／居留證／護照號碼<input name="payee_id_no" maxlength="20" autocomplete="off"></label>
+          <label>戶籍地址<input name="payee_address" autocomplete="off"></label>
+          <label>連絡電話<input type="tel" name="payee_phone" autocomplete="off"></label>
+          <label>Email<input type="email" name="payee_email" autocomplete="off"></label>
+        </div>
+        <h4>勞務內容與所得類別</h4>
+        <div class="grid">
+          <label>勞務內容<input name="category" placeholder="例如：LOGO 設計"></label>
+          <label>期間（起）<input type="date" name="period_start"></label>
+          <label>期間（迄）<input type="date" name="period_end"></label>
+          <label>所得類別<select name="income_type">${optionsHTML(INCOME_TYPES, '9A')}</select></label>
+          <label>給付金額（元）*<input type="number" min="0" name="gross" required></label>
+          <label class="check" style="align-self:end"><input type="checkbox" name="nhi_exempt"> 已提供職業工會加保證明（免扣補充保費）</label>
+        </div>
+        <h4>付款資料</h4>
+        <div class="grid">
+          <label>付款方式<select name="pay_method">${optionsHTML(PAY_METHODS, 'transfer')}</select></label>
+          <label>銀行名稱<input name="bank_name" autocomplete="off"></label>
+          <label>銀行分行<input name="bank_branch" autocomplete="off"></label>
+          <label>所得人帳號<input name="bank_account" autocomplete="off" inputmode="numeric"></label>
+          <label>所得人戶名<input name="account_holder" autocomplete="off"></label>
+        </div>
+        <label style="margin-top:10px">備註<input name="note"></label>
+        <div id="svPreview" class="muted" style="margin:10px 0"></div>
+        <div class="dlg-actions">
+          <button type="button" class="btn" id="svCancel" hidden>取消編輯</button>
+          <button class="btn primary" type="submit" id="svSubmit">儲存</button>
+        </div>
+        <p class="note">扣繳規則依公司的勞務報酬單附件設定（數字可在「設定」頁修改）。身分證號、帳號屬敏感個資，僅存於你的私有資料庫。稿費免稅額的實際抵扣與年度申報仍需自行判斷。</p>
+      </form>
+      <div class="card"><div class="row"><label>年度<input type="number" id="svYear" value="${year}" style="width:100px"></label>
+        <button class="btn" id="svCsv">匯出 CSV</button></div><div class="table-wrap" id="svList" style="margin-top:10px"></div></div>`;
+
     const form = $('#svForm');
-    form.addEventListener('input', () => {
-      const r = calcService(form.gross.value, rates);
-      $('#svPreview').textContent = `扣繳 ${money(r.withholding)}　補充保費 ${money(r.nhi)}　實領 ${money(r.net)}`;
+    let editing = null;
+    const calcFromForm = () => calcService(form.gross.value, rates, { status: form.payee_status.value, type: form.income_type.value, nhiExempt: form.nhi_exempt.checked });
+    const preview = () => {
+      const r = calcFromForm();
+      $('#svPreview').textContent = `扣繳 ${money(r.withholding)}　補充保費 ${money(r.nhi)}　支領淨額 ${money(r.net)}`;
+    };
+    const resetForm = () => {
+      editing = null;
+      form.reset();
+      form.pay_date.value = today();
+      $('#svTitle').textContent = '新增勞務報酬單';
+      $('#svSubmit').textContent = '儲存';
+      $('#svCancel').hidden = true;
+      $('#svPreview').textContent = '';
+    };
+    const startEdit = (rec) => {
+      editing = rec;
+      SV_TEXT_FIELDS.forEach((k) => { form[k].value = rec[k] === null || rec[k] === undefined ? '' : rec[k]; });
+      form.nhi_exempt.checked = !!rec.nhi_exempt;
+      $('#svTitle').textContent = `編輯勞務報酬單：${rec.payee}`;
+      $('#svSubmit').textContent = '更新';
+      $('#svCancel').hidden = false;
+      preview();
+      form.scrollIntoView({ behavior: 'smooth' });
+    };
+    $('#svCancel').onclick = resetForm;
+
+    // 從員工名單帶入領款人資料（帶入後仍可修改）
+    $('#svSource').addEventListener('change', (ev) => {
+      const emp = employees.find((e) => e.id === ev.target.value);
+      form.payee.value = emp ? emp.name : '';
+      form.payee_id_no.value = emp ? emp.id_no || '' : '';
+      form.payee_address.value = emp ? emp.address || '' : '';
+      form.payee_email.value = emp ? emp.email || '' : '';
+      form.payee_phone.value = emp ? emp.phone || '' : '';
+      form.account_holder.value = emp ? emp.name : '';
+      if (emp && (!emp.id_no || !emp.address)) toast('此員工尚未填身分證字號或地址，可直接在這裡補填，或到「員工」頁補上');
     });
+    form.addEventListener('input', preview);
+    form.addEventListener('change', preview);
+
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(form);
-      const r = calcService(f.get('gross'), rates);
-      await q(sb.from('service_payments').insert({
+      const r = calcFromForm();
+      const row = {
         pay_date: f.get('pay_date'), payee: f.get('payee').trim(), category: f.get('category').trim(),
         payee_id_no: f.get('payee_id_no').trim().toUpperCase(), payee_address: f.get('payee_address').trim(),
+        payee_email: f.get('payee_email').trim(), payee_phone: f.get('payee_phone').trim(),
+        payee_status: f.get('payee_status'), income_type: f.get('income_type'),
+        period_start: f.get('period_start') || null, period_end: f.get('period_end') || null,
+        bank_name: f.get('bank_name').trim(), bank_branch: f.get('bank_branch').trim(),
+        bank_account: f.get('bank_account').trim(), account_holder: f.get('account_holder').trim(),
+        pay_method: f.get('pay_method'), nhi_exempt: form.nhi_exempt.checked,
         gross: r.gross, withholding: r.withholding, nhi: r.nhi, net: r.net, note: f.get('note').trim()
-      }));
-      toast('已儲存'); form.reset(); form.pay_date.value = today(); $('#svPreview').textContent = ''; load();
+      };
+      if (row.period_start && row.period_end && row.period_end < row.period_start) return toast('期間的迄日不可早於起日', true);
+      await q(editing ? sb.from('service_payments').update(row).eq('id', editing.id) : sb.from('service_payments').insert(row));
+      toast(editing ? '已更新' : '已儲存');
+      resetForm();
+      load();
     });
+
     let list = [];
+    const typeLabel = (r) => `${r.income_type}${r.payee_status === 'foreign_under' ? '（非居住者）' : ''}`;
     const load = async () => {
       const y = $('#svYear').value;
       list = await q(sb.from('service_payments').select('*').gte('pay_date', `${y}-01-01`).lte('pay_date', `${y}-12-31`).order('pay_date', { ascending: false }));
       const s = (f) => list.reduce((a, r) => a + r[f], 0);
-      $('#svList').innerHTML = list.length ? `<table><thead><tr><th>日期</th><th>領款人</th><th>類別</th><th class="num">金額</th><th class="num">扣繳</th><th class="num">補充保費</th><th class="num">實領</th><th></th></tr></thead>
-        <tbody>${list.map((r) => `<tr><td>${esc(r.pay_date)}</td><td>${esc(r.payee)}</td><td>${esc(r.category)}</td><td class="num">${money(r.gross)}</td><td class="num">${money(r.withholding)}</td><td class="num">${money(r.nhi)}</td><td class="num">${money(r.net)}</td><td><button class="btn small" data-slip="${r.id}">勞務報酬單</button> <button class="btn small danger" data-del="${r.id}">刪除</button></td></tr>`).join('')}</tbody>
-        <tfoot><tr><td colspan="3">合計</td><td class="num">${money(s('gross'))}</td><td class="num">${money(s('withholding'))}</td><td class="num">${money(s('nhi'))}</td><td class="num">${money(s('net'))}</td><td></td></tr></tfoot></table>`
+      $('#svList').innerHTML = list.length ? `<table><thead><tr><th>日期</th><th>領款人</th><th>所得類別</th><th>勞務內容</th><th class="num">金額</th><th class="num">扣繳</th><th class="num">補充保費</th><th class="num">淨額</th><th></th></tr></thead>
+        <tbody>${list.map((r) => `<tr><td>${esc(r.pay_date)}</td><td>${esc(r.payee)}</td><td>${esc(typeLabel(r))}</td><td>${esc(r.category)}</td><td class="num">${money(r.gross)}</td><td class="num">${money(r.withholding)}</td><td class="num">${money(r.nhi)}</td><td class="num">${money(r.net)}</td>
+          <td><button class="btn small" data-slip="${r.id}">勞務報酬單</button> <button class="btn small" data-edit="${r.id}">編輯</button> <button class="btn small danger" data-del="${r.id}">刪除</button></td></tr>`).join('')}</tbody>
+        <tfoot><tr><td colspan="4">合計</td><td class="num">${money(s('gross'))}</td><td class="num">${money(s('withholding'))}</td><td class="num">${money(s('nhi'))}</td><td class="num">${money(s('net'))}</td><td></td></tr></tfoot></table>`
         : '<div class="empty">這一年度還沒有紀錄。</div>';
       $('#svList').querySelectorAll('[data-slip]').forEach((b) => (b.onclick = () => showServiceSlip(list.find((r) => r.id === b.dataset.slip))));
+      $('#svList').querySelectorAll('[data-edit]').forEach((b) => (b.onclick = () => startEdit(list.find((r) => r.id === b.dataset.edit))));
       $('#svList').querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => {
         if (!confirm('確定刪除這筆紀錄？')) return;
         const rec = list.find((x) => x.id === b.dataset.del);
         const files = [rec.id_front_path, rec.id_back_path].filter(Boolean);
         if (files.length) await sb.storage.from(ID_BUCKET).remove(files); // 一併刪除身分證影本
-        await q(sb.from('service_payments').delete().eq('id', b.dataset.del)); load();
+        await q(sb.from('service_payments').delete().eq('id', b.dataset.del));
+        if (editing && editing.id === rec.id) resetForm();
+        load();
       }));
     };
     $('#svYear').onchange = load;
     $('#svCsv').onclick = () => {
       if (!list.length) return toast('沒有資料可匯出', true);
-      downloadCSV(`勞務報酬_${$('#svYear').value}.csv`, [['日期', '領款人', '身分證字號', '戶籍地址', '類別', '金額', '扣繳稅款', '補充保費', '實領', '備註'],
-        ...list.map((r) => [r.pay_date, r.payee, r.payee_id_no, r.payee_address, r.category, r.gross, r.withholding, r.nhi, r.net, r.note])]);
+      const stLabel = Object.fromEntries(PAYEE_STATUS), pmLabel = Object.fromEntries(PAY_METHODS);
+      downloadCSV(`勞務報酬_${$('#svYear').value}.csv`, [
+        ['日期', '領款人', '身分別', '身分證／居留證／護照', '戶籍地址', '聯絡電話', 'Email', '所得類別', '勞務內容', '期間起', '期間迄', '金額', '扣繳稅款', '補充保費', '淨額', '付款方式', '銀行', '分行', '帳號', '戶名', '備註'],
+        ...list.map((r) => [r.pay_date, r.payee, stLabel[r.payee_status], r.payee_id_no, r.payee_address, r.payee_phone, r.payee_email, r.income_type, r.category,
+          r.period_start, r.period_end, r.gross, r.withholding, r.nhi, r.net, pmLabel[r.pay_method], r.bank_name, r.bank_branch, r.bank_account, r.account_holder, r.note])]);
     };
     load();
   }
@@ -777,7 +926,11 @@
     ['prorateDivisor', '到職／離職當月按日計薪的除數（天）', 'num'],
     ['ot1', '加班倍率 一', 'num'], ['ot2', '加班倍率 二', 'num'], ['ot3', '加班倍率 三', 'num'], ['sickPayRatio', '普通病假給薪比例 %', 'pct'],
     ['taxExemption', '所得稅：免稅額（每人，元）', 'num'], ['taxStandard', '所得稅：標準扣除額（單身，元）', 'num'], ['taxSpecial', '所得稅：薪資特別扣除額（元）', 'num'],
-    ['svcWithholdRate', '勞務報酬扣繳率 %', 'pct'], ['svcWithholdThreshold', '勞務報酬 扣繳起點（元）', 'num'], ['svcNhiThreshold', '勞務報酬 補充保費起點（元）', 'num']
+    ['svcWithholdRate', '勞務報酬扣繳率 %', 'pct'], ['svcWithholdThreshold', '勞務報酬 扣繳起點（元）', 'num'], ['svcNhiThreshold', '勞務報酬 補充保費起點（元）', 'num'],
+    ['salaryWithholdThreshold', '勞務單：兼職薪資（50）扣繳起點（元）', 'num'], ['salaryWithholdRate', '勞務單：兼職薪資（50）扣繳率 %', 'pct'],
+    ['nonResSalaryLimit', '勞務單：非居住者薪資 低稅率上限（元）', 'num'], ['nonResSalaryLowRate', '勞務單：非居住者薪資 上限以下扣繳率 %', 'pct'],
+    ['nonResSalaryHighRate', '勞務單：非居住者薪資 逾上限扣繳率 %', 'pct'], ['nonResRate', '勞務單：非居住者 9A／9B／92 扣繳率 %', 'pct'],
+    ['nonResManuscriptLimit', '勞務單：非居住者稿費 免扣繳上限（元）', 'num']
   ];
   const BACKUP_TABLES = [['settings', 'key'], ['employees', 'created_at'], ['payrolls', 'created_at'], ['service_payments', 'created_at']];
 

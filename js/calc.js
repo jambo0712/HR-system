@@ -26,6 +26,13 @@
     svcWithholdRate: 0.1,    // 勞務報酬扣繳率（居住者）
     svcWithholdThreshold: 20010, // 單次給付達此金額才扣繳
     svcNhiThreshold: 20000,  // 單次給付達此金額才收補充保費
+    salaryWithholdThreshold: 90501, // 兼職薪資（勞務單 50 類）達此金額才扣繳
+    salaryWithholdRate: 0.05,       // 兼職薪資扣繳率
+    nonResSalaryLimit: 44250,       // 非居住者（在台未滿 183 天）薪資：低稅率上限
+    nonResSalaryLowRate: 0.06,      // 上限以下
+    nonResSalaryHighRate: 0.18,     // 逾上限
+    nonResRate: 0.2,                // 非居住者 執行業務／稿費／其他所得
+    nonResManuscriptLimit: 5000,    // 非居住者稿費：不超過此金額免扣繳
     // 薪資所得扣繳估算（115 年綜所稅參數）
     taxExemption: 101000,    // 免稅額（每人）
     taxStandard: 136000,     // 標準扣除額（單身）
@@ -164,11 +171,32 @@
     };
   }
 
-  // 勞務報酬（外包／稿費等，居住者）
-  function calcService(gross, rt) {
+  // 勞務報酬單：依「身分別」與「所得類別」計算扣繳稅額與補充保費
+  //   status: national（本國籍）／foreign_183（外國籍在台滿 183 天）／foreign_under（未滿 183 天）
+  //   type:   50 薪資所得／9A 執行業務所得／9B 稿費／92 其他所得
+  //   opts.nhiExempt: 已提供職業工會等健保加保證明，免扣補充保費
+  function calcService(gross, rt, opts) {
+    const o = opts || {};
     const g = n(gross);
-    const withholding = g >= rt.svcWithholdThreshold ? rd(g * rt.svcWithholdRate) : 0;
-    const nhi = g >= rt.svcNhiThreshold ? rd(g * rt.suppRate) : 0;
+    const status = o.status || 'national';
+    const type = o.type || '9A';
+    let withholding = 0;
+    let nhi = 0;
+
+    if (status === 'foreign_under') {
+      // 非居住者：不收補充保費
+      if (type === '50') withholding = rd(g * (g <= rt.nonResSalaryLimit ? rt.nonResSalaryLowRate : rt.nonResSalaryHighRate));
+      else if (type === '9B') withholding = g > rt.nonResManuscriptLimit ? rd(g * rt.nonResRate) : 0;
+      else withholding = rd(g * rt.nonResRate);
+    } else if (type === '50') {
+      withholding = g >= rt.salaryWithholdThreshold ? rd(g * rt.salaryWithholdRate) : 0;
+      nhi = g >= rt.minWage ? rd(g * rt.suppRate) : 0;
+    } else if (type === '9A' || type === '9B') {
+      withholding = g >= rt.svcWithholdThreshold ? rd(g * rt.svcWithholdRate) : 0;
+      nhi = g >= rt.svcNhiThreshold ? rd(g * rt.suppRate) : 0;
+    } // 92 其他所得：不扣繳、不收補充保費
+
+    if (o.nhiExempt) nhi = 0;
     return { gross: g, withholding, nhi, net: g - withholding - nhi };
   }
 

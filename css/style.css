@@ -134,6 +134,32 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .slip .sign div { border-bottom: 1px solid #111; padding-bottom: 36px; }
 .slip .foot { color: #666; font-size: .8rem; margin-top: 18px; }
 
+h4 { margin: 16px 0 8px; font-size: .95rem; color: var(--muted); }
+
+/* 勞務報酬單（附件格式） */
+.slip.lf-wrap { max-width: 800px; padding: 18px; }
+.lf-title { text-align: center; font-size: 22px; margin: 0 0 6px; font-weight: 600; }
+.lf-date { text-align: center; margin-bottom: 8px; }
+.lf { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; margin: 0; }
+.lf td { border: 1.5px solid #555; padding: 5px 8px; vertical-align: top; line-height: 1.55; white-space: normal; overflow-wrap: anywhere; }
+.lf .c { text-align: center; vertical-align: middle; }
+.lf .r { text-align: right; }
+.lf .s { font-size: 11.5px; }
+.lf .chk { vertical-align: middle; line-height: 2; }
+.lf .amt { line-height: 1.9; }
+.lf .amt u { text-decoration: underline; }
+.lf .bank { margin-top: 14px; line-height: 1.9; }
+.lf .signs { padding: 0; }
+.lf .sg { height: 50%; min-height: 105px; padding: 5px 8px; }
+.lf .sg + .sg { border-top: 1.5px solid #555; }
+.lf td.pair { padding: 0; }
+.lf .pairin { display: flex; }
+.lf .half { flex: 1 1 50%; min-width: 0; }
+.lf .half + .half { border-left: 1.5px solid #555; }
+.lf .half .hd { text-align: center; padding: 5px 8px; border-bottom: 1.5px solid #555; }
+.lf .imgbox { height: 230px; display: flex; align-items: center; justify-content: center; padding: 6px; }
+.lf .imgbox img { max-width: 100%; max-height: 218px; }
+
 /* 身分證影本 */
 .id-panel { max-width: 720px; margin: 0 auto 12px; }
 .id-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; }
@@ -148,8 +174,23 @@ dialog::backdrop { background: rgba(0, 0, 0, .45); }
 .slip-attach img { width: 100%; border: 1px solid #ccc; }
 .slip-attach figcaption { text-align: center; color: #555; font-size: .85rem; }
 
+@page { size: A4; margin: 8mm; }
 @media print {
   .id-panel { display: none; }
+  .slip.lf-wrap { padding: 0; }
+  .lf-title { font-size: 18px; margin-bottom: 2px; }
+  .lf-date { margin-bottom: 4px; font-size: 11px; }
+  .lf { font-size: 10.5px; }
+  .lf td { padding: 3px 6px; line-height: 1.45; }
+  .lf .s { font-size: 9.5px; }
+  .lf .chk { line-height: 1.8; }
+  .lf .amt { line-height: 1.6; }
+  .lf .bank { margin-top: 6px; line-height: 1.6; }
+  .lf .sg { min-height: 24mm; }
+  .lf .half .hd { padding: 2px 5px; }
+  .lf .imgbox { height: 56mm; padding: 2px; }
+  .lf .imgbox img { max-height: 54mm; }
+  .lf tr { break-inside: avoid; }
   body > *:not(#slipOverlay) { display: none !important; }
   .overlay { position: static; padding: 0; background: #fff; overflow: visible; }
   .slip-tools { display: none; }
